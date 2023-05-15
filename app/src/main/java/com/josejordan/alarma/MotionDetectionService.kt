@@ -13,7 +13,6 @@ import androidx.lifecycle.LifecycleRegistry
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import java.util.LinkedList
-import java.util.Queue
 import kotlin.math.pow
 
 
@@ -22,7 +21,6 @@ class MotionDetectionService : Service(), LifecycleOwner {
     private val lifecycleRegistry = LifecycleRegistry(this)
     private var mediaPlayer: MediaPlayer? = null
     private var isServiceStarted = false
-
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageAnalysis: ImageAnalysis? = null
 
@@ -88,8 +86,60 @@ class MotionDetectionService : Service(), LifecycleOwner {
         }
     }
 
-    //septimo
+    //octavo mejorado
     inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
+        private val THRESHOLD = 5000  // Increased threshold
+        private val lastFrames = LinkedList<ByteBuffer>()
+        private var lastTriggerTime = 0L
+        private val MIN_TIME_BETWEEN_TRIGGERS = 10000 // Increased minimum time between triggers
+        private val FRAME_BUFFER_SIZE = 10  // Increased buffer size
+
+        override fun analyze(image: ImageProxy) {
+            val currentFrame = image.planes[0].buffer
+            val newFrame = ByteBuffer.allocateDirect(currentFrame.capacity())
+            currentFrame.rewind()
+            newFrame.put(currentFrame)
+            currentFrame.rewind() // rewind the currentFrame again for the next possible usage
+            newFrame.flip() // flip the newFrame buffer to make it ready for get operations
+            lastFrames.add(newFrame)
+
+            if (lastFrames.size > FRAME_BUFFER_SIZE) {
+                lastFrames.remove()
+            }
+
+            try {
+                if (lastFrames.size == FRAME_BUFFER_SIZE) {
+                    val firstFrame = lastFrames.peek()
+                    if (hasMotion(firstFrame, currentFrame)) {
+                        val currentTriggerTime = System.currentTimeMillis()
+                        if (currentTriggerTime - lastTriggerTime >= MIN_TIME_BETWEEN_TRIGGERS) {
+                            onMotionDetected()
+                            lastTriggerTime = currentTriggerTime
+                        }
+                    }
+                }
+            } finally {
+                image.close()
+            }
+        }
+
+        private fun hasMotion(previousFrame: ByteBuffer, currentFrame: ByteBuffer): Boolean {
+            previousFrame.rewind()
+            currentFrame.rewind()
+
+            var diff = 0.0
+            while (previousFrame.hasRemaining() && currentFrame.hasRemaining()) {
+                diff += (previousFrame.get().toInt() - currentFrame.get().toInt()).toDouble().pow(2)
+            }
+
+            val averageDiff = diff / (previousFrame.limit().toDouble())
+            return averageDiff > THRESHOLD
+        }
+    }
+
+
+    //septimo
+/*    inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
         private val THRESHOLD = 5000  // Increased threshold
         private var lastFrames: Queue<ByteBuffer> = LinkedList()
         private var lastTriggerTime = 0L
@@ -125,10 +175,11 @@ class MotionDetectionService : Service(), LifecycleOwner {
             val averageDiff = diff / (previousFrame.limit().toDouble())
             return averageDiff > THRESHOLD
         }
-    }
+    }*/
 
 //sexto mejorandoel segundo
-/*    inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
+/*
+    inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
         private val THRESHOLD = 2500
         private var lastFrames: Queue<ByteBuffer> = LinkedList()
         private var lastTriggerTime = 0L
@@ -165,10 +216,12 @@ class MotionDetectionService : Service(), LifecycleOwner {
             val averageDiff = diff / (previousFrame.limit().toDouble())
             return averageDiff > THRESHOLD
         }
-    }*/
+    }
+*/
 
 //quinto menos sensible
-/*inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
+/*
+inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
     private val BASE_THRESHOLD = 60 // Base threshold.
     private val MIN_TIME_BETWEEN_TRIGGERS = 3000 // Min time between triggers (in milliseconds).
     private var lastFrame: ByteBuffer? = null
@@ -209,8 +262,8 @@ class MotionDetectionService : Service(), LifecycleOwner {
         val averageDiff = diff.toDouble() / (previousFrame.limit().toDouble())
         return averageDiff > adjustedThreshold
     }
-}*/
-
+}
+*/
 
 //cuarto con variacion luminica y tiempo
 /*    inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
@@ -257,7 +310,8 @@ class MotionDetectionService : Service(), LifecycleOwner {
     }*/
 
 // tercero con variacion luminica
- /*   inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
+/*
+    inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
         private val THRESHOLD = 30 // Este es un valor que quizás necesites ajustar.
         private var lastFrame: ByteBuffer? = null
 
@@ -292,10 +346,12 @@ class MotionDetectionService : Service(), LifecycleOwner {
             val averageDiff = diff.toDouble() / (previousFrame.limit().toDouble())
             return averageDiff > adjustedThreshold
         }
-    }*/
+    }
+*/
 
 //segundo con poca luminosidad
-/*inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
+/*
+inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
          private val THRESHOLD = 50 // Aumentamos el umbral de detección.
          private var lastFrame: ByteBuffer? = null
          private var lastTriggerTime = 0L
@@ -329,11 +385,12 @@ class MotionDetectionService : Service(), LifecycleOwner {
              val averageDiff = diff.toDouble() / (previousFrame.limit().toDouble())
              return averageDiff > THRESHOLD
          }
-     }*/
+     }
+*/
 
 //primero
-/*    inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
-            private val THRESHOLD = 30
+  /*  inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
+            private val THRESHOLD = 50
             private var lastFrame: ByteBuffer? = null
 
             override fun analyze(image: ImageProxy) {
@@ -360,5 +417,5 @@ class MotionDetectionService : Service(), LifecycleOwner {
                 val averageDiff = diff.toDouble() / (previousFrame.limit().toDouble())
                 return averageDiff > THRESHOLD
             }
-        }*/
-}
+        }
+*/}
