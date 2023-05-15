@@ -19,6 +19,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import java.util.LinkedList
@@ -26,13 +30,15 @@ import kotlin.math.pow
 
 
 class MotionDetectionService : Service(), LifecycleOwner {
-    private val executor = Executors.newSingleThreadExecutor()
+    //private val executor = Executors.newSingleThreadExecutor()
     private val lifecycleRegistry = LifecycleRegistry(this)
     private var mediaPlayer: MediaPlayer? = null
     private var isServiceStarted = false
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageAnalysis: ImageAnalysis? = null
     private var wakeLock: PowerManager.WakeLock? = null  // Variable miembro para el WakeLock
+    private val coroutineScope = CoroutineScope(Dispatchers.Default)
+    private val coroutineExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
 
     companion object {
         const val CHANNEL_ID = "MotionDetectionChannel"
@@ -109,6 +115,8 @@ class MotionDetectionService : Service(), LifecycleOwner {
 
     override fun onDestroy() {
         super.onDestroy()
+        coroutineScope.cancel()
+
         mediaPlayer?.stop()
         mediaPlayer?.release()
         mediaPlayer = null
@@ -143,7 +151,8 @@ class MotionDetectionService : Service(), LifecycleOwner {
             .build()
 
         val motionDetectionAnalyzer = MotionDetectionAnalyzer { startAlarm() }
-        imageAnalysis?.setAnalyzer(executor, motionDetectionAnalyzer)
+        //imageAnalysis?.setAnalyzer(executor, motionDetectionAnalyzer)
+        imageAnalysis?.setAnalyzer(coroutineExecutor, motionDetectionAnalyzer)
 
         val cameraSelector = CameraSelector.Builder()
             .requireLensFacing(CameraSelector.LENS_FACING_BACK)
@@ -164,7 +173,6 @@ class MotionDetectionService : Service(), LifecycleOwner {
         }
     }
 
-    //octavo MotionDetectionAnalyzer mejorado
     inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
         private val THRESHOLD = 5000  // Increased threshold
         private val lastFrames = LinkedList<ByteBuffer>()
@@ -173,6 +181,7 @@ class MotionDetectionService : Service(), LifecycleOwner {
         private val FRAME_BUFFER_SIZE = 10  // Increased buffer size
 
         override fun analyze(image: ImageProxy) {
+            coroutineScope.launch {
             val currentFrame = image.planes[0].buffer
             val newFrame = ByteBuffer.allocateDirect(currentFrame.capacity())
             currentFrame.rewind()
@@ -198,6 +207,7 @@ class MotionDetectionService : Service(), LifecycleOwner {
                 }
             }
         }
+    }
 
         private fun hasMotion(previousFrame: ByteBuffer, currentFrame: ByteBuffer): Boolean {
             previousFrame.rewind()
