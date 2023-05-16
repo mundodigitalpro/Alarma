@@ -27,31 +27,40 @@ import java.nio.ByteBuffer
 import java.util.concurrent.Executors
 import java.util.LinkedList
 import kotlin.math.pow
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import android.graphics.Rect
+import android.graphics.YuvImage
+import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.util.*
 
 
 class MotionDetectionService : Service(), LifecycleOwner {
-    //private val executor = Executors.newSingleThreadExecutor()
     private val lifecycleRegistry = LifecycleRegistry(this)
     private var mediaPlayer: MediaPlayer? = null
     private var isServiceStarted = false
     private var cameraProvider: ProcessCameraProvider? = null
     private var imageAnalysis: ImageAnalysis? = null
-    private var wakeLock: PowerManager.WakeLock? = null  // Variable miembro para el WakeLock
+    private var wakeLock: PowerManager.WakeLock? = null
     private val coroutineScope = CoroutineScope(Dispatchers.Default)
-    private val coroutineExecutor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
+    private val coroutineExecutor =
+        Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors())
+    private val motionDetectionAnalyzer = MotionDetectionAnalyzer { startAlarm() }
 
     companion object {
         const val CHANNEL_ID = "MotionDetectionChannel"
         const val NOTIFICATION_ID = 1
         const val CHANNEL_DESCRIPTION = "Canal para la notificación de detección de movimiento"
-
     }
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
     }
-
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -67,29 +76,23 @@ class MotionDetectionService : Service(), LifecycleOwner {
         }
     }
 
-
     override fun onBind(intent: Intent): IBinder? {
         return null
     }
-
 
     override fun onStartCommand(intent: Intent, flags: Int, startId: Int): Int {
         if (!isServiceStarted) {
             lifecycleRegistry.currentState = Lifecycle.State.STARTED
 
-            // Intenta adquirir el WakeLock
             try {
                 val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-                wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyApp::MyWakelockTag")
+                wakeLock =
+                    powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "MyApp::MyWakelockTag")
                 wakeLock?.acquire()
             } catch (e: SecurityException) {
                 Log.e("MotionDetectionService", "Error adquiriendo WakeLock", e)
-                // Aquí puedes manejar el error, por ejemplo, puedes detener el servicio si el WakeLock es esencial para tu aplicación
-                //stopSelf()
-                //return START_NOT_STICKY
             }
 
-            // Crea una notificación y establece el servicio en primer plano
             val notificationIntent = Intent(this, MainActivity::class.java)
             val pendingIntent = PendingIntent.getActivity(
                 this,
@@ -102,12 +105,10 @@ class MotionDetectionService : Service(), LifecycleOwner {
                 .setSmallIcon(R.drawable.ic_launcher_foreground) // Cambia esto por el ícono de notificación que desees
                 .setContentIntent(pendingIntent)
                 .build()
-
-
             startForeground(NOTIFICATION_ID, notification)
-
             startCamera()
             isServiceStarted = true
+            motionDetectionAnalyzer.lastTriggerTime = System.currentTimeMillis()
         }
         return START_STICKY
     }
@@ -116,16 +117,13 @@ class MotionDetectionService : Service(), LifecycleOwner {
     override fun onDestroy() {
         super.onDestroy()
         coroutineScope.cancel()
-
         mediaPlayer?.stop()
         mediaPlayer?.release()
         mediaPlayer = null
         isServiceStarted = false
-
         imageAnalysis?.clearAnalyzer()
         cameraProvider?.unbindAll()
 
-        // Verifica si el WakeLock está encendido antes de liberarlo
         if (wakeLock?.isHeld == true) {
             wakeLock?.release()
         }
@@ -150,8 +148,6 @@ class MotionDetectionService : Service(), LifecycleOwner {
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
 
-        val motionDetectionAnalyzer = MotionDetectionAnalyzer { startAlarm() }
-        //imageAnalysis?.setAnalyzer(executor, motionDetectionAnalyzer)
         imageAnalysis?.setAnalyzer(coroutineExecutor, motionDetectionAnalyzer)
 
         val cameraSelector = CameraSelector.Builder()
@@ -173,41 +169,122 @@ class MotionDetectionService : Service(), LifecycleOwner {
         }
     }
 
-    inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) : ImageAnalysis.Analyzer {
+    inner class MotionDetectionAnalyzer(private val onMotionDetected: () -> Unit) :
+        ImageAnalysis.Analyzer {
         private val THRESHOLD = 5000  // Increased threshold
         private val lastFrames = LinkedList<ByteBuffer>()
-        private var lastTriggerTime = 0L
+        var lastTriggerTime = 0L
         private val MIN_TIME_BETWEEN_TRIGGERS = 10000 // Increased minimum time between triggers
         private val FRAME_BUFFER_SIZE = 10  // Increased buffer size
 
         override fun analyze(image: ImageProxy) {
             coroutineScope.launch {
-            val currentFrame = image.planes[0].buffer
-            val newFrame = ByteBuffer.allocateDirect(currentFrame.capacity())
-            currentFrame.rewind()
-            newFrame.put(currentFrame)
-            currentFrame.rewind() // rewind the currentFrame again for the next possible usage
-            newFrame.flip() // flip the newFrame buffer to make it ready for get operations
-            lastFrames.add(newFrame)
+                try {
+                    val currentFrame = image.planes[0].buffer
+                    val newFrame = ByteBuffer.allocateDirect(currentFrame.capacity())
+                    currentFrame.rewind()
+                    newFrame.put(currentFrame)
+                    currentFrame.rewind()
+                    newFrame.flip()
+                    lastFrames.add(newFrame)
 
-            if (lastFrames.size > FRAME_BUFFER_SIZE) {
-                lastFrames.remove()
+                    if (lastFrames.size > FRAME_BUFFER_SIZE) {
+                        lastFrames.remove()
+                    }
+
+                    if (lastFrames.size == FRAME_BUFFER_SIZE) {
+                        val firstFrame = lastFrames.peek()
+                        if (hasMotion(firstFrame as ByteBuffer, currentFrame)) {
+                            Log.d("MotionDetectionAnalyzer", "Movimiento detectado")
+                            val currentTriggerTime = System.currentTimeMillis()
+                            if (currentTriggerTime - lastTriggerTime >= MIN_TIME_BETWEEN_TRIGGERS) {
+                                onMotionDetected()
+                                Log.d("MotionDetectionAnalyzer", "Tomando foto")
+                                takePicture(image)
+                                lastTriggerTime = currentTriggerTime
+                            }
+                        }
+                    }
+                } catch (e: Exception) {  // Manejo de errores
+                    Log.e("MotionDetectionAnalyzer", "Error en analyze", e)
+                } finally {
+                    image.close()  // Asegurarse de que la imagen siempre se cierra
+                }
+            }
+        }
+
+
+        private suspend fun takePicture(image: ImageProxy) = withContext(Dispatchers.IO) {
+            try {
+                val bitmap = yuv420888ToBitmap(image)
+                saveBitmapToFile(bitmap)
+            } catch (e: Exception) {  // Manejo de errores
+                Log.e("MotionDetectionAnalyzer", "Error al tomar foto", e)
+            }
+        }
+
+
+        private fun yuv420888ToBitmap(image: ImageProxy): Bitmap {
+            val nv21 = Yuv420888ToNv21(image)
+            val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
+            val out = ByteArrayOutputStream()
+            yuvImage.compressToJpeg(Rect(0, 0, yuvImage.width, yuvImage.height), 100, out)
+            val imageBytes = out.toByteArray()
+            return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+        }
+
+        private fun Yuv420888ToNv21(image: ImageProxy): ByteArray {
+            val pixelCount = image.cropRect.width() * image.cropRect.height()
+            val pixelSizeBits = ImageFormat.getBitsPerPixel(ImageFormat.YUV_420_888)
+            val outputBuffer = ByteArray(pixelCount * pixelSizeBits / 8)
+            imageToByteBuffer(image, outputBuffer)
+            return outputBuffer
+        }
+       private fun imageToByteBuffer(image: ImageProxy, outputBuffer: ByteArray) {
+            val imageCrop = image.cropRect
+            val imagePlanes = image.planes
+
+            val yPixelStride = imagePlanes[0].pixelStride
+            val yRowStride = imagePlanes[0].rowStride
+            var outputPixel = 0
+            val yPlaneBuffer = imagePlanes[0].buffer
+
+            for (row in 0 until imageCrop.height()) {
+                var rowOffset = row * yRowStride
+                for (pixel in 0 until imageCrop.width()) {
+                    outputBuffer[outputPixel++] = yPlaneBuffer.get(rowOffset)
+                    rowOffset += yPixelStride
+                }
             }
 
-            image.use {
-                if (lastFrames.size == FRAME_BUFFER_SIZE) {
-                    val firstFrame = lastFrames.peek()
-                    if (hasMotion(firstFrame as ByteBuffer, currentFrame)) {
-                        val currentTriggerTime = System.currentTimeMillis()
-                        if (currentTriggerTime - lastTriggerTime >= MIN_TIME_BETWEEN_TRIGGERS) {
-                            onMotionDetected()
-                            lastTriggerTime = currentTriggerTime
-                        }
+            for (planeIndex in 1..2) {
+                val plane = imagePlanes[planeIndex]
+                val uvPlaneBuffer = plane.buffer
+                val uvPixelStride = plane.pixelStride
+                val uvRowStride = plane.rowStride
+
+                for (row in 0 until imageCrop.height() / 2) {
+                    var rowOffset = row * uvRowStride
+                    for (pixel in 0 until imageCrop.width() / 2) {
+                        outputBuffer[outputPixel++] = uvPlaneBuffer.get(rowOffset)
+                        rowOffset += uvPixelStride
                     }
                 }
             }
         }
-    }
+
+        private suspend fun saveBitmapToFile(bitmap: Bitmap) = withContext(Dispatchers.IO) {
+            try {
+                val filename = "${UUID.randomUUID()}.jpg"
+                val file = File(applicationContext.getExternalFilesDir(null), filename)
+                val fos = FileOutputStream(file)
+
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 100, fos)
+                fos.close()
+            } catch (e: Exception) {
+                Log.e("MotionDetectionAnalyzer", "Error al guardar foto", e)
+            }
+        }
 
         private fun hasMotion(previousFrame: ByteBuffer, currentFrame: ByteBuffer): Boolean {
             previousFrame.rewind()
@@ -219,7 +296,67 @@ class MotionDetectionService : Service(), LifecycleOwner {
             }
 
             val averageDiff = diff / (previousFrame.limit().toDouble())
+            Log.d("MotionDetectionAnalyzer", "averageDiff: $averageDiff")
             return averageDiff > THRESHOLD
         }
     }
+
+
+
+
+    /*        private suspend fun takePicture(image: ImageProxy) {
+                val yuvBytes = imageToByteArray(image)
+                val bitmap = yuvToBitmap(yuvBytes, image.width, image.height)
+                saveBitmapToFile(bitmap)
+            }*/
+
+    /*        private fun imageToByteArray(image: ImageProxy): ByteArray {
+                val planes = image.planes
+                val yBuffer = planes[0].buffer
+                val uBuffer = planes[1].buffer
+                val vBuffer = planes[2].buffer
+
+                val ySize = yBuffer.remaining()
+                val uSize = uBuffer.remaining() / 2
+                val vSize = vBuffer.remaining() / 2
+
+                val nv21 = ByteArray(ySize + uSize + vSize)
+
+                yBuffer.get(nv21, 0, ySize)
+
+                var vIndex = ySize
+                var uIndex = ySize + vSize
+
+                for (i in 0 until uSize) {
+                    nv21[vIndex++] = vBuffer.get(i * 2)
+                    nv21[uIndex++] = uBuffer.get(i * 2)
+                }
+
+                return nv21
+            }*/
+
+    /*
+            private fun yuvToBitmap(yuvBytes: ByteArray, width: Int, height: Int): Bitmap {
+                val rs = RenderScript.create(applicationContext)  // "this" is your context
+                val yuvToRgbIntrinsic = ScriptIntrinsicYuvToRGB.create(rs, Element.U8_4(rs))
+
+                val yuvType = Type.Builder(rs, Element.U8(rs)).setX(yuvBytes.size)
+                val inAllocation = Allocation.createTyped(rs, yuvType.create(), Allocation.USAGE_SCRIPT)
+
+                val rgbaType = Type.Builder(rs, Element.RGBA_8888(rs)).setX(width).setY(height)
+                val outAllocation = Allocation.createTyped(rs, rgbaType.create(), Allocation.USAGE_SCRIPT)
+
+                inAllocation.copyFrom(yuvBytes)
+
+                yuvToRgbIntrinsic.setInput(inAllocation)
+                yuvToRgbIntrinsic.forEach(outAllocation)
+
+                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                outAllocation.copyTo(bitmap)
+
+                return bitmap
+            }
+    */
+
+
 }
