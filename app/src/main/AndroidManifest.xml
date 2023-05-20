@@ -6,9 +6,8 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-      <uses-feature android:name="android.hardware.camera" />
 
-
+    <uses-feature android:name="android.hardware.camera" />
 
     <application
         android:allowBackup="true"
@@ -20,6 +19,12 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Alarma"
         tools:targetApi="31">
+        <activity
+            android:name=".ImageDetailActivity"
+            android:exported="false" />
+        <activity
+            android:name=".ImageListActivity"
+            android:exported="false" />
 
         <service android:name=".MotionDetectionService" />
 

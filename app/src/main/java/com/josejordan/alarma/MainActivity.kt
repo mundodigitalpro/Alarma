@@ -60,5 +60,10 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+    fun showImageList(view: View) {
+        val intent = Intent(this, ImageListActivity::class.java)
+        startActivity(intent)
+    }
+
 }
 
