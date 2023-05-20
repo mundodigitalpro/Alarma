@@ -36,6 +36,7 @@ import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
+import java.text.SimpleDateFormat
 import java.util.*
 
 
@@ -273,9 +274,13 @@ class MotionDetectionService : Service(), LifecycleOwner {
             }
         }
 
+
         private suspend fun saveBitmapToFile(bitmap: Bitmap) = withContext(Dispatchers.IO) {
             try {
-                val filename = "${UUID.randomUUID()}.jpg"
+                val dateFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+                val date = Date()
+                val filename = "IMG_${dateFormat.format(date)}.jpg"
+
                 val file = File(applicationContext.getExternalFilesDir(null), filename)
                 val fos = FileOutputStream(file)
 
@@ -285,6 +290,7 @@ class MotionDetectionService : Service(), LifecycleOwner {
                 Log.e("MotionDetectionAnalyzer", "Error al guardar foto", e)
             }
         }
+
 
         private fun hasMotion(previousFrame: ByteBuffer, currentFrame: ByteBuffer): Boolean {
             previousFrame.rewind()
