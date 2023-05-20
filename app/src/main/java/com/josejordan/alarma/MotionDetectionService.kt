@@ -225,7 +225,7 @@ class MotionDetectionService : Service(), LifecycleOwner {
 
 
         private fun yuv420888ToBitmap(image: ImageProxy): Bitmap {
-            val nv21 = Yuv420888ToNv21(image)
+            val nv21 = yuv420888ToNv21(image)
             val yuvImage = YuvImage(nv21, ImageFormat.NV21, image.width, image.height, null)
             val out = ByteArrayOutputStream()
             yuvImage.compressToJpeg(Rect(0, 0, yuvImage.width, yuvImage.height), 100, out)
@@ -233,7 +233,7 @@ class MotionDetectionService : Service(), LifecycleOwner {
             return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
         }
 
-        private fun Yuv420888ToNv21(image: ImageProxy): ByteArray {
+        private fun yuv420888ToNv21(image: ImageProxy): ByteArray {
             val pixelCount = image.cropRect.width() * image.cropRect.height()
             val pixelSizeBits = ImageFormat.getBitsPerPixel(ImageFormat.YUV_420_888)
             val outputBuffer = ByteArray(pixelCount * pixelSizeBits / 8)
@@ -300,63 +300,4 @@ class MotionDetectionService : Service(), LifecycleOwner {
             return averageDiff > THRESHOLD
         }
     }
-
-
-
-
-    /*        private suspend fun takePicture(image: ImageProxy) {
-                val yuvBytes = imageToByteArray(image)
-                val bitmap = yuvToBitmap(yuvBytes, image.width, image.height)
-                saveBitmapToFile(bitmap)
-            }*/
-
-    /*        private fun imageToByteArray(image: ImageProxy): ByteArray {
-                val planes = image.planes
-                val yBuffer = planes[0].buffer
-                val uBuffer = planes[1].buffer
-                val vBuffer = planes[2].buffer
-
-                val ySize = yBuffer.remaining()
-                val uSize = uBuffer.remaining() / 2
-                val vSize = vBuffer.remaining() / 2
-
-                val nv21 = ByteArray(ySize + uSize + vSize)
-
-                yBuffer.get(nv21, 0, ySize)
-
-                var vIndex = ySize
-                var uIndex = ySize + vSize
-
-                for (i in 0 until uSize) {
-                    nv21[vIndex++] = vBuffer.get(i * 2)
-                    nv21[uIndex++] = uBuffer.get(i * 2)
-                }
-
-                return nv21
-            }*/
-
-    /*
-            private fun yuvToBitmap(yuvBytes: ByteArray, width: Int, height: Int): Bitmap {
-                val rs = RenderScript.create(applicationContext)  // "this" is your context
-                val yuvToRgbIntrinsic = ScriptIntrinsicYuvToRGB.create(rs, Element.U8_4(rs))
-
-                val yuvType = Type.Builder(rs, Element.U8(rs)).setX(yuvBytes.size)
-                val inAllocation = Allocation.createTyped(rs, yuvType.create(), Allocation.USAGE_SCRIPT)
-
-                val rgbaType = Type.Builder(rs, Element.RGBA_8888(rs)).setX(width).setY(height)
-                val outAllocation = Allocation.createTyped(rs, rgbaType.create(), Allocation.USAGE_SCRIPT)
-
-                inAllocation.copyFrom(yuvBytes)
-
-                yuvToRgbIntrinsic.setInput(inAllocation)
-                yuvToRgbIntrinsic.forEach(outAllocation)
-
-                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                outAllocation.copyTo(bitmap)
-
-                return bitmap
-            }
-    */
-
-
 }
